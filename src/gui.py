@@ -2,8 +2,12 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 import threading
+import base64
+import mimetypes
+import os
 from PIL import Image, ImageTk
 import sys
+import requests
 
 # Add src to path
 project_root = Path(__file__).resolve().parents[1]
@@ -30,6 +34,7 @@ class ImageToWordApp:
         self.photo_original = None
         self.photo_preprocessed = None
         self._is_closing = False
+        self.use_api_var = tk.BooleanVar(value=False)
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         
@@ -57,6 +62,13 @@ class ImageToWordApp:
         self.engine_combo = ttk.Combobox(toolbar, textvariable=self.engine_var, values=["auto", "easyocr", "tesseract"], width=10)
         self.engine_combo.pack(side=tk.LEFT)
         self.engine_combo.bind("<<ComboboxSelected>>", self._on_engine_change)
+
+        self.api_checkbox = tk.Checkbutton(
+            toolbar,
+            text="Use OpenAI API OCR (gpt-4o-mini)",
+            variable=self.use_api_var,
+        )
+        self.api_checkbox.pack(side=tk.LEFT, padx=(15, 5))
         
         # 2. Main Content (Paned Window)
         paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL)
@@ -133,13 +145,14 @@ class ImageToWordApp:
         self.ocr_engine = OCREngine(engine=self.engine_var.get())
 
     def _run_ocr_threaded(self):
+        use_openai_api = bool(self.use_api_var.get())
         self.btn_run.config(state=tk.DISABLED)
         self.btn_open.config(state=tk.DISABLED)
         self.btn_save.config(state=tk.DISABLED)
         self.progress['value'] = 0
         self.status_var.set("Processing...")
         
-        thread = threading.Thread(target=self._ocr_task, daemon=True)
+        thread = threading.Thread(target=lambda: self._ocr_task(use_openai_api), daemon=True)
         thread.start()
 
     def _ui(self, callback):
@@ -158,7 +171,7 @@ class ImageToWordApp:
         except tk.TclError:
             pass
 
-    def _ocr_task(self):
+    def _ocr_task(self, use_openai_api=False):
         try:
             # 1. Loading
             self._ui(lambda: self.status_var.set("Step 1/3: Loading image..."))
@@ -167,16 +180,39 @@ class ImageToWordApp:
             self._ui(lambda: self.progress.config(value=20))
             
             # 2. OCR — run on RAW image (preprocessing hurts EasyOCR on handwriting)
-            self._ui(lambda: self.status_var.set("Step 2/3: Running OCR (this may take a moment)..."))
-            # Use run() for well-ordered, cleaned text
-            cleaned_text = self.ocr_engine.run(raw_image_path)
-            # Use run_with_boxes() for layout detection
-            boxes = self.ocr_engine.run_with_boxes(raw_image_path)
+            boxes = []
+            if use_openai_api:
+                self._ui(lambda: self.status_var.set("Step 2/3: Running OpenAI OCR..."))
+                try:
+                    cleaned_text = self._run_openai_ocr(raw_image_path)
+                    if not cleaned_text.strip():
+                        raise RuntimeError("OpenAI OCR returned empty text")
+                except Exception:
+                    self._ui(lambda: self.status_var.set("OpenAI OCR failed, using local OCR fallback..."))
+                    cleaned_text = self.ocr_engine.run(raw_image_path)
+                    boxes = self.ocr_engine.run_with_boxes(raw_image_path)
+            else:
+                self._ui(lambda: self.status_var.set("Step 2/3: Running OCR (this may take a moment)..."))
+                # Use run() for well-ordered, cleaned text
+                cleaned_text = self.ocr_engine.run(raw_image_path)
+                # Use run_with_boxes() for layout detection
+                boxes = self.ocr_engine.run_with_boxes(raw_image_path)
+
             self._ui(lambda: self.progress.config(value=80))
             
             # 3. Formatting detection from boxes (for docx structure)
             self._ui(lambda: self.status_var.set("Step 3/3: Detecting layout..."))
-            self.last_blocks = self.detector.detect_formatting(boxes)
+            if boxes:
+                self.last_blocks = self.detector.detect_formatting(boxes)
+            else:
+                self.last_blocks = [
+                    FormattedBlock(
+                        text=cleaned_text,
+                        block_type="body",
+                        alignment="left",
+                        indent_level=0,
+                    )
+                ]
             self._ui(lambda: self.progress.config(value=100))
             
             # Show the CLEAN text in UI (not the raw box concatenation)
@@ -190,6 +226,72 @@ class ImageToWordApp:
         finally:
             self._ui(lambda: self.btn_run.config(state=tk.NORMAL))
             self._ui(lambda: self.btn_open.config(state=tk.NORMAL))
+
+    def _run_openai_ocr(self, image_path):
+        api_key = self._read_api_key_from_env()
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY not found in .env")
+
+        with open(image_path, "rb") as image_file:
+            image_b64 = base64.b64encode(image_file.read()).decode("ascii")
+        mime_type = mimetypes.guess_type(str(image_path))[0] or "image/png"
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        payload = {
+            "model": "gpt-4o-mini",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are an OCR assistant. Extract text exactly from the image.",
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Extract all visible text. Return only plain text with line breaks preserved.",
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime_type};base64,{image_b64}",
+                            },
+                        },
+                    ],
+                },
+            ],
+            "temperature": 0,
+        }
+
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=60,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data["choices"][0]["message"]["content"].strip()
+
+    def _read_api_key_from_env(self):
+        env_path = project_root / ".env"
+        if not env_path.exists():
+            return None
+
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            if key.strip() == "OPENAI_API_KEY":
+                return value.strip().strip('"').strip("'")
+
+        return os.getenv("OPENAI_API_KEY")
 
     def _update_text_area(self, text):
         self.text_area.delete("1.0", tk.END)
