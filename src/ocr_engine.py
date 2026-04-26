@@ -82,7 +82,10 @@ class OCREngine:
 
     def run(self, image: Path | str | np.ndarray) -> str:
         if self.engine == "auto":
-            text = self._run_easyocr_text(image)
+            try:
+                text = self._run_easyocr_text(image)
+            except Exception:
+                text = ""
             if text.strip():
                 return self._postprocess_text(text)
             return self._postprocess_text(self._run_tesseract_text(image))
@@ -103,7 +106,10 @@ class OCREngine:
 
     def run_with_boxes(self, image: Path | str | np.ndarray) -> List[Dict[str, Any]]:
         if self.engine == "auto":
-            boxes = self._run_easyocr_boxes(image)
+            try:
+                boxes = self._run_easyocr_boxes(image)
+            except Exception:
+                boxes = []
             if boxes:
                 self.last_confidence_rows = self._to_confidence_rows(boxes)
                 return boxes
