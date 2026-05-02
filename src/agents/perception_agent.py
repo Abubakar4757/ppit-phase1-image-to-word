@@ -117,7 +117,15 @@ class PerceptionAgent:
     # ------------------------------------------------------------------ #
 
     def _estimate_skew(self, gray: np.ndarray) -> float:
-        """Estimate document skew via min-area-rect on non-zero pixels."""
+        """Estimate document skew via min-area-rect on non-zero pixels.
+
+        cv2.minAreaRect returns an angle in (0, 90] in OpenCV 4.5+, where
+        a perfectly horizontal text bar yields angle=90. We normalize so
+        that 0° means "horizontal" and only return angles within a
+        plausible document-skew range. Anything outside ±15° is treated
+        as a misdetection (the bounding rect's orientation doesn't reflect
+        actual text-line tilt — common with page borders or noise).
+        """
         binary = cv2.adaptiveThreshold(
             gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY_INV, 31, 12,
@@ -128,8 +136,17 @@ class PerceptionAgent:
 
         rect = cv2.minAreaRect(coords)
         angle = rect[-1]
-        if angle < -45:
-            angle = 90 + angle
+
+        # Normalize OpenCV minAreaRect angle to a signed value near 0
+        if angle > 45:
+            angle = angle - 90
+        elif angle < -45:
+            angle = angle + 90
+
+        # Real document skew is small. Reject implausible values.
+        if abs(angle) > 15:
+            return 0.0
+
         return round(angle, 2) if abs(angle) > 0.2 else 0.0
 
     def _estimate_density(self, gray: np.ndarray) -> str:

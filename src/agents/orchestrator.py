@@ -486,9 +486,13 @@ class Orchestrator:
             if coords is not None and len(coords) > 100:
                 rect = cv2.minAreaRect(coords)
                 angle = rect[-1]
-                if angle < -45:
-                    angle = 90 + angle
-                if abs(angle) > 0.2:
+                # Normalize OpenCV 4.5+ angle convention to signed near 0
+                if angle > 45:
+                    angle = angle - 90
+                elif angle < -45:
+                    angle = angle + 90
+                # Skip rotation for implausible angles (likely misdetection)
+                if 0.2 < abs(angle) <= 15:
                     h, w = img.shape[:2]
                     center = (w // 2, h // 2)
                     matrix = cv2.getRotationMatrix2D(center, angle, 1.0)

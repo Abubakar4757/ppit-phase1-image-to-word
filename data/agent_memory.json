@@ -30,14 +30,66 @@
       "image_brightness": 157.6343445652174,
       "image_blur_score": 399.3771570429304,
       "success": true
+    },
+    {
+      "timestamp": "2026-05-02T18:20:05.768344",
+      "image_path": "G:\\ppit-phase1-image-to-word\\data\\sample_images\\bakar_handwriting.jpeg",
+      "engine_used": "easyocr",
+      "preprocessing_strategy": "standard",
+      "quality_score": 0.7812439024390244,
+      "confidence": 0.7560975609756098,
+      "was_corrected": false,
+      "user_corrections": 0,
+      "image_brightness": 209.94417967038777,
+      "image_blur_score": 5284.087088845978,
+      "success": true
+    },
+    {
+      "timestamp": "2026-05-02T18:25:12.807523",
+      "image_path": "G:\\ppit-phase1-image-to-word\\data\\sample_images\\bakar_handwriting.jpeg",
+      "engine_used": "easyocr",
+      "preprocessing_strategy": "standard",
+      "quality_score": 0.6729320549286943,
+      "confidence": 0.700598721595361,
+      "was_corrected": false,
+      "user_corrections": 0,
+      "image_brightness": 209.94417967038777,
+      "image_blur_score": 5284.087088845978,
+      "success": true
+    },
+    {
+      "timestamp": "2026-05-02T18:26:31.284426",
+      "image_path": "G:\\ppit-phase1-image-to-word\\data\\sample_images\\bakar_handwriting_3.jpeg",
+      "engine_used": "easyocr",
+      "preprocessing_strategy": "standard",
+      "quality_score": 0.7120283286117948,
+      "confidence": 0.7164142935240755,
+      "was_corrected": false,
+      "user_corrections": 0,
+      "image_brightness": 174.95872643295223,
+      "image_blur_score": 3784.136414715651,
+      "success": true
+    },
+    {
+      "timestamp": "2026-05-02T18:28:11.071065",
+      "image_path": "G:\\ppit-phase1-image-to-word\\data\\sample_images\\image2.jpeg",
+      "engine_used": "easyocr",
+      "preprocessing_strategy": "standard",
+      "quality_score": 0.6498554913294797,
+      "confidence": 0.653179190751445,
+      "was_corrected": false,
+      "user_corrections": 0,
+      "image_brightness": 172.16425791556728,
+      "image_blur_score": 1497.4107332295152,
+      "success": true
     }
   ],
   "correction_patterns": {},
   "engine_performance": {
     "easyocr": {
-      "total_runs": 2,
-      "avg_confidence": 0.540213844846517,
-      "total_confidence": 1.080427689693034
+      "total_runs": 6,
+      "avg_confidence": 0.6511195760899209,
+      "total_confidence": 3.9067174565395253
     },
     "tesseract": {
       "total_runs": 0,
