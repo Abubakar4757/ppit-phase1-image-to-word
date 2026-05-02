@@ -19,9 +19,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
-from src.agents.memory_store import MemoryStore, ConversionRecord
+from src.agents.memory_store import MemoryStore
 from src.agents.agent_logger import AgentLogger
 
 
@@ -98,15 +98,36 @@ class FeedbackLoop:
         short_words = [w for w in words if len(w) <= 2 and w.isalpha()]
         report.short_word_ratio = len(short_words) / max(1, len(words))
 
+        # ---- Fragmentation detection (single-char token ratio) ----
+        # When OCR reads handwriting character-by-character, most tokens are
+        # length-1 (e.g. "L", "8", "H"). This is the strongest signal of failure.
+        single_char_tokens = [w for w in words if len(w) == 1]
+        single_char_ratio = len(single_char_tokens) / max(1, len(words))
+
+        # ---- Numeric dominance ----
+        numeric_tokens = [w for w in words if re.match(r'^\d+$', w)]
+        numeric_ratio = len(numeric_tokens) / max(1, len(words))
+
+        # ---- Average token length (short = fragmented) ----
+        avg_word_len = sum(len(w) for w in words) / max(1, len(words))
+
         # ---- Compute overall score ----
         conf_score = report.avg_confidence
         gibberish_penalty = report.gibberish_ratio * 0.5
         short_penalty = max(0, report.short_word_ratio - 0.3) * 0.3
+        # Single-char fragmentation is the strongest failure signal
+        fragmentation_penalty = single_char_ratio * 0.65
+        # Excessive isolated digits signals diagram/table confusion
+        numeric_penalty = max(0, numeric_ratio - 0.2) * 0.45
+        # Very low average token length = fragmented output
+        short_len_penalty = max(0, (3.0 - avg_word_len) / 3.0) * 0.3
         word_bonus = min(0.1, report.word_count / 1000.0)
 
         report.overall_score = max(
             0.0,
-            min(1.0, conf_score - gibberish_penalty - short_penalty + word_bonus),
+            min(1.0, conf_score - gibberish_penalty - short_penalty
+                - fragmentation_penalty - numeric_penalty - short_len_penalty
+                + word_bonus),
         )
 
         # ---- Identify issues ----
@@ -118,6 +139,16 @@ class FeedbackLoop:
             report.issues.append(f"Very few words extracted ({report.word_count})")
         if report.short_word_ratio > 0.5:
             report.issues.append("Many single/double-character words (fragmented OCR)")
+        if single_char_ratio > 0.3:
+            report.issues.append(
+                f"Highly fragmented output — {single_char_ratio:.0%} single-character tokens "
+                f"(OCR treating each stroke as a separate character)"
+            )
+        if numeric_ratio > 0.4:
+            report.issues.append(
+                f"Numeric token dominance ({numeric_ratio:.0%}) — "
+                f"engine likely confused by diagrams or formulas"
+            )
 
         # ---- Acceptability ----
         report.is_acceptable = report.overall_score >= threshold

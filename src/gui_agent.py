@@ -392,6 +392,13 @@ class AgenticApp:
             lines.append("")
             lines.append(f"  🔄 Retries used: {self.last_result.retry_count}")
 
+        if self.last_result and self.last_result.api_ocr_used:
+            lines.append("")
+            lines.append("  🌐 Vision API escalation used")
+            lines.append("     Local OCR quality was too low after retries.")
+            lines.append("     Agent autonomously called gpt-4o-mini Vision API.")
+            lines.append("     Image was sent to OpenAI — see Privacy tab for details.")
+
         if self.last_result and self.last_result.corrections_applied > 0:
             lines.append(f"  📝 Learned corrections applied: {self.last_result.corrections_applied}")
 

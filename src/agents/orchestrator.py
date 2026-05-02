@@ -23,12 +23,16 @@ Phase 2 Requirement Mapping:
 
 from __future__ import annotations
 
+import base64
+import mimetypes
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
+import requests
 
 from src.agents.perception_agent import PerceptionAgent, ImageProfile
 from src.agents.decision_engine import DecisionEngine, ProcessingStrategy
@@ -59,6 +63,7 @@ class AgentResult:
     privacy_report: Optional[PrivacyReport] = None
     corrections_applied: int = 0
     retry_count: int = 0
+    api_ocr_used: bool = False
     success: bool = False
     error: str = ""
 
@@ -207,6 +212,25 @@ class Orchestrator:
 
             result.quality_report = quality
             result.strategy = strategy
+
+            # ============================================================ #
+            #  STEP 4b: ESCALATE — Vision API when local OCR quality fails  #
+            # ============================================================ #
+            # The agent autonomously decides to call an external Vision API
+            # only when local engines have exhausted their retries and the
+            # output is still clearly unusable (score < 0.35). This is a
+            # real cost/privacy tradeoff decision — logged for transparency.
+            if not quality.is_acceptable and quality.overall_score < 0.35:
+                api_result = self._try_api_escalation(path, quality)
+                if api_result is not None:
+                    api_text, api_quality = api_result
+                    if api_quality.overall_score > quality.overall_score:
+                        text = api_text
+                        boxes = []
+                        quality = api_quality
+                        result.quality_report = quality
+                        result.api_ocr_used = True
+                        result.retry_count += 1
 
             # ============================================================ #
             #  STEP 5: LEARN — Apply corrections & update memory             #
@@ -488,3 +512,181 @@ class Orchestrator:
             seen.add(key)
             merged_lines.append(clean)
         return "\n".join(merged_lines)
+
+    # ================================================================ #
+    #  API escalation — Vision API fallback when local OCR fails        #
+    # ================================================================ #
+
+    def _try_api_escalation(
+        self,
+        image_path: Path,
+        current_quality: QualityReport,
+    ) -> Optional[Tuple[str, QualityReport]]:
+        """
+        Attempt OCR via the OpenAI Vision API as a last resort.
+
+        The agent reaches this path only when:
+          1. All local engines have been tried and retried
+          2. Quality score is still below 0.35 (clearly unusable output)
+
+        This is an autonomous agent decision with a cost/privacy tradeoff:
+          - Cost: an external API call is made (not free)
+          - Privacy: the image leaves the local machine
+          - Benefit: Vision models handle handwriting far better than
+            local OCR engines
+
+        Blocked in "manual" autonomy mode — the user must act explicitly.
+        Allowed in "semi" and "full" modes with a logged privacy notice.
+        """
+        if self.safety.autonomy_level == "manual":
+            self.logger.log_decision(
+                agent="DecisionEngine",
+                action="API escalation skipped — manual autonomy mode",
+                reasoning=(
+                    "autonomy_level=manual: agent will not send image data to "
+                    "an external service without an explicit user action"
+                ),
+                confidence=1.0,
+            )
+            return None
+
+        api_key = self._read_api_key()
+        if not api_key:
+            self.logger.log_decision(
+                agent="DecisionEngine",
+                action="API escalation skipped — no OPENAI_API_KEY in .env",
+                reasoning="Key not found; set OPENAI_API_KEY in .env to enable Vision API fallback",
+                confidence=1.0,
+            )
+            return None
+
+        self.logger.log_decision(
+            agent="DecisionEngine",
+            action="Escalating to Vision API (gpt-4o-mini)",
+            reasoning=(
+                f"Local OCR quality={current_quality.overall_score:.2f} after all retries — "
+                f"issues: {'; '.join(current_quality.issues) or 'fragmented output'}. "
+                f"Vision API selected as final fallback."
+            ),
+            alternatives=["accept poor quality", "request manual correction"],
+            confidence=0.9,
+            metadata={
+                "autonomy_level": self.safety.autonomy_level,
+                "privacy_note": "Image will be sent to OpenAI API",
+            },
+        )
+        self.logger.log_decision(
+            agent="PrivacyGuard",
+            action="API escalation privacy notice",
+            reasoning=(
+                "Image is being sent to OpenAI gpt-4o-mini for OCR. "
+                "Review the image for sensitive/confidential content. "
+                "This is logged for transparency and audit."
+            ),
+            confidence=1.0,
+        )
+
+        try:
+            self._on_status("🌐 Escalating to Vision API (gpt-4o-mini)...")
+            api_text = self._run_api_ocr(image_path, api_key)
+
+            if not api_text.strip():
+                self.logger.log_decision(
+                    agent="Orchestrator",
+                    action="API OCR returned empty result",
+                    reasoning="Vision API produced no text — keeping local OCR output",
+                    confidence=0.0,
+                    outcome="rejected",
+                )
+                return None
+
+            api_quality = self.feedback.evaluate_quality(api_text, threshold=0.5)
+
+            self.logger.log_decision(
+                agent="FeedbackLoop",
+                action=f"API OCR quality: {api_quality.overall_score:.2f} "
+                       f"({'ACCEPTED' if api_quality.overall_score > current_quality.overall_score else 'REJECTED'})",
+                reasoning=(
+                    f"Vision API result — words={api_quality.word_count}, "
+                    f"confidence={api_quality.avg_confidence:.2f}. "
+                    f"Previous local score was {current_quality.overall_score:.2f}."
+                ),
+                confidence=api_quality.overall_score,
+                outcome=(
+                    "api_result_adopted"
+                    if api_quality.overall_score > current_quality.overall_score
+                    else "api_result_rejected_no_improvement"
+                ),
+            )
+
+            return api_text, api_quality
+
+        except Exception as exc:
+            self.logger.log_decision(
+                agent="Orchestrator",
+                action="API escalation failed",
+                reasoning=str(exc),
+                confidence=0.0,
+                outcome="error",
+            )
+            return None
+
+    def _run_api_ocr(self, image_path: Path, api_key: str) -> str:
+        """Call the OpenAI Vision API and return extracted text."""
+        with open(image_path, "rb") as fh:
+            image_b64 = base64.b64encode(fh.read()).decode("ascii")
+        mime_type = mimetypes.guess_type(str(image_path))[0] or "image/png"
+
+        payload = {
+            "model": "gpt-4o-mini",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are an OCR assistant. Extract text exactly as it appears.",
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "Extract all visible text from this image. "
+                                "Preserve line breaks and structure. "
+                                "Return only the extracted text — no explanations."
+                            ),
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime_type};base64,{image_b64}"},
+                        },
+                    ],
+                },
+            ],
+            "temperature": 0,
+        }
+
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=60,
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"].strip()
+
+    def _read_api_key(self) -> Optional[str]:
+        """Read OPENAI_API_KEY from project .env or environment."""
+        # src/agents/orchestrator.py → parents[2] = project root
+        env_path = Path(__file__).resolve().parents[2] / ".env"
+        if env_path.exists():
+            for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                if key.strip() == "OPENAI_API_KEY":
+                    return value.strip().strip('"').strip("'")
+        return os.getenv("OPENAI_API_KEY")

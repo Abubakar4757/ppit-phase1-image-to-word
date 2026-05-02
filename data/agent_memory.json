@@ -1,0 +1,58 @@
+{
+  "preferences": {
+    "preferred_engine": null,
+    "auto_enhance": true,
+    "confidence_threshold": 0.5
+  },
+  "history": [
+    {
+      "timestamp": "2026-05-02T18:02:28.578512",
+      "image_path": "G:\\ppit-phase1-image-to-word\\data\\sample_images\\image1.jpeg",
+      "engine_used": "easyocr",
+      "preprocessing_strategy": "aggressive",
+      "quality_score": 0.5995534381960281,
+      "confidence": 0.5175534381960282,
+      "was_corrected": false,
+      "user_corrections": 0,
+      "image_brightness": 157.6343445652174,
+      "image_blur_score": 399.3771570429304,
+      "success": true
+    },
+    {
+      "timestamp": "2026-05-02T18:12:33.635875",
+      "image_path": "G:\\ppit-phase1-image-to-word\\data\\sample_images\\image1.jpeg",
+      "engine_used": "easyocr",
+      "preprocessing_strategy": "aggressive",
+      "quality_score": 0.48772455089820355,
+      "confidence": 0.562874251497006,
+      "was_corrected": false,
+      "user_corrections": 0,
+      "image_brightness": 157.6343445652174,
+      "image_blur_score": 399.3771570429304,
+      "success": true
+    }
+  ],
+  "correction_patterns": {},
+  "engine_performance": {
+    "easyocr": {
+      "total_runs": 2,
+      "avg_confidence": 0.540213844846517,
+      "total_confidence": 1.080427689693034
+    },
+    "tesseract": {
+      "total_runs": 0,
+      "avg_confidence": 0.0,
+      "total_confidence": 0.0
+    },
+    "paddleocr": {
+      "total_runs": 0,
+      "avg_confidence": 0.0,
+      "total_confidence": 0.0
+    },
+    "trocr": {
+      "total_runs": 0,
+      "avg_confidence": 0.0,
+      "total_confidence": 0.0
+    }
+  }
+}
