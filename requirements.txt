@@ -9,31 +9,22 @@ scikit-image
 imageio
 numpy
 
-# OCR engines
+# OCR engines (primary: easyocr + tesseract)
 pytesseract
 easyocr
-paddleocr
-paddlepaddle
 
-# ML / AI
+# ML backbone for EasyOCR
 torch
 torchvision
-transformers
-safetensors
-tokenizers
-huggingface_hub
 
 # Document output
 python-docx
 lxml
 
-# Data
+# Data & utils
 pandas
-numpy
 shapely
 scipy
-
-# Utils
 requests
 tqdm
 pyyaml
@@ -42,3 +33,4 @@ packaging
 python-dateutil
 six
 psutil
+python-bidi
