@@ -7,6 +7,13 @@ from dotenv import load_dotenv
 # Load environment variables from .env
 load_dotenv()
 
+
+@st.cache_resource(show_spinner="⏳ Loading EasyOCR model (first run only)...")
+def _load_easyocr_reader():
+    """Pre-warm EasyOCR once at startup. Cached globally across all sessions."""
+    import easyocr
+    return easyocr.Reader(["en"], gpu=False)
+
 # Add project root to path if needed
 import sys
 project_root = Path(__file__).resolve().parent
@@ -118,14 +125,20 @@ with col1:
 if run_agent_btn and uploaded_file is not None:
     if "docx_bytes" in st.session_state:
         del st.session_state.docx_bytes
-        
+
     # We must run the orchestrator and update progress
     with st.spinner("🤖 Agent pipeline running..."):
         # Save uploaded file to temp path
         with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded_file.name).suffix) as tmp:
             tmp.write(uploaded_file.getvalue())
             tmp_path = tmp.name
-            
+
+        # Inject the pre-warmed EasyOCR reader into the OCR engine
+        # so it never triggers a model download mid-run
+        from src.ocr_engine import OCREngine
+        _easyocr_reader = _load_easyocr_reader()
+        OCREngine._cached_easyocr_reader = _easyocr_reader
+
         progress_bar = st.progress(0, text="Initializing...")
         
         # Override callbacks temporarily for this run to update UI natively

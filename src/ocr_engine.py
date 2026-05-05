@@ -312,9 +312,11 @@ class OCREngine:
         return avg_conf + count_bonus
 
     def _get_easyocr_reader(self):
+        # Use pre-warmed reader injected by Streamlit cache_resource if available
+        if hasattr(OCREngine, "_cached_easyocr_reader") and OCREngine._cached_easyocr_reader is not None:
+            return OCREngine._cached_easyocr_reader
         if self._easyocr_reader is None:
             import easyocr
-
             self._easyocr_reader = easyocr.Reader(["en"], gpu=False)
         return self._easyocr_reader
 
