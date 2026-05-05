@@ -98,7 +98,7 @@ col1, col2, col3 = st.columns([1, 1.5, 1])
 with col1:
     st.subheader("Image & Profile")
     if uploaded_file is not None:
-        st.image(uploaded_file, caption="Original Image", use_container_width=True)
+        st.image(uploaded_file, caption="Original Image", width='stretch')
         
     with st.expander("📊 Image Profile", expanded=False):
         if st.session_state.last_result and st.session_state.last_result.image_profile:
